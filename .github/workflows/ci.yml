@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - main
-      - feat/initial-safe-scaffold
+      - 'feat/**'
   workflow_dispatch:
 
 permissions:
