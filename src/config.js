@@ -1,5 +1,7 @@
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = '127.0.0.1';
+const DEFAULT_ADAPTER = 'fake';
+const SUPPORTED_ADAPTERS = new Set(['fake']);
 
 export function parsePort(value) {
   if (value === undefined || value === '') {
@@ -32,10 +34,19 @@ export function parseHost(value) {
   return host;
 }
 
+export function parseAdapter(value) {
+  const adapter = value === undefined || value === '' ? DEFAULT_ADAPTER : value;
+  if (!SUPPORTED_ADAPTERS.has(adapter)) {
+    throw new Error(`ADAPTER must be one of: ${[...SUPPORTED_ADAPTERS].join(', ')}`);
+  }
+  return adapter;
+}
+
 export function loadConfig(env = process.env) {
   return Object.freeze({
     host: parseHost(env.HOST),
     port: parsePort(env.PORT),
+    adapter: parseAdapter(env.ADAPTER),
   });
 }
 

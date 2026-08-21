@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { loadConfig, parseHost, parsePort } from '../src/config.js';
+import { loadConfig, parseAdapter, parseHost, parsePort } from '../src/config.js';
 
-test('loadConfig uses loopback and port 3000 by default', () => {
-  assert.deepEqual(loadConfig({}), { host: '127.0.0.1', port: 3000 });
+test('loadConfig uses safe defaults', () => {
+  assert.deepEqual(loadConfig({}), { host: '127.0.0.1', port: 3000, adapter: 'fake' });
 });
 
 test('parsePort accepts only complete decimal integers in range', () => {
@@ -22,8 +22,16 @@ test('parseHost rejects whitespace and slash-bearing values', () => {
   }
 });
 
+test('parseAdapter accepts only implemented adapters', () => {
+  assert.equal(parseAdapter(undefined), 'fake');
+  assert.equal(parseAdapter('fake'), 'fake');
+  for (const value of ['obins', 'real', 'FAKE', ' fake ']) {
+    assert.throws(() => parseAdapter(value), /ADAPTER must be one of: fake/);
+  }
+});
+
 test('loadConfig returns a frozen validated object', () => {
-  const value = loadConfig({ HOST: 'localhost', PORT: '8080' });
-  assert.deepEqual(value, { host: 'localhost', port: 8080 });
+  const value = loadConfig({ HOST: 'localhost', PORT: '8080', ADAPTER: 'fake' });
+  assert.deepEqual(value, { host: 'localhost', port: 8080, adapter: 'fake' });
   assert.equal(Object.isFrozen(value), true);
 });
