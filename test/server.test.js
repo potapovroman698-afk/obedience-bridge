@@ -12,7 +12,7 @@ test('GET /health returns a minimal healthy response', async (t) => {
   const response = await fetch(`http://127.0.0.1:${address.port}/health`);
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get('content-type'), 'application/json');
+  assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8');
   assert.deepEqual(await response.json(), { status: 'ok' });
 });
 
