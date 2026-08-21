@@ -40,6 +40,15 @@ export function createServer({ logger = defaultLogger, readiness = async () => (
       method: req.method, path: url.pathname, statusCode: res.statusCode,
     }));
 
+    if (req.method === 'GET' && url.pathname === '/') {
+      send(res, 200, 'application/json; charset=utf-8', JSON.stringify({
+        status: 'ok',
+        service: 'obedience-bridge',
+        obedienceAuthorization: obedienceAuth ? 'available' : 'unavailable',
+      }));
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/health') {
       send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok' }));
       return;
@@ -82,7 +91,7 @@ export function createServer({ logger = defaultLogger, readiness = async () => (
       return;
     }
 
-    if (['/health', '/ready', '/obedience/authorize', '/obedience/callback'].includes(url.pathname)) {
+    if (['/', '/health', '/ready', '/obedience/authorize', '/obedience/callback'].includes(url.pathname)) {
       res.setHeader('allow', 'GET');
       send(res, 405, 'text/plain; charset=utf-8', 'Method Not Allowed');
       return;
