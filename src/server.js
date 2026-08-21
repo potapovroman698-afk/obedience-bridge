@@ -17,23 +17,16 @@ const HTTP_LIMITS = Object.freeze({
 });
 
 function send(res, statusCode, contentType, body) {
-  res.writeHead(statusCode, {
-    ...RESPONSE_HEADERS,
-    'content-type': contentType,
-  });
+  res.writeHead(statusCode, { ...RESPONSE_HEADERS, 'content-type': contentType });
   res.end(body);
 }
 
 function parseRequestUrl(value) {
-  try {
-    return new URL(value ?? '/', 'http://localhost');
-  } catch {
-    return null;
-  }
+  try { return new URL(value ?? '/', 'http://localhost'); } catch { return null; }
 }
 
-export function createServer({ logger = defaultLogger } = {}) {
-  const server = http.createServer((req, res) => {
+export function createServer({ logger = defaultLogger, readiness = async () => ({ ready: true }) } = {}) {
+  const server = http.createServer(async (req, res) => {
     const url = parseRequestUrl(req.url);
     if (!url) {
       logger.warn('http.bad_request', { method: req.method });
@@ -41,20 +34,28 @@ export function createServer({ logger = defaultLogger } = {}) {
       return;
     }
 
-    res.once('finish', () => {
-      logger.info('http.request', {
-        method: req.method,
-        path: url.pathname,
-        statusCode: res.statusCode,
-      });
-    });
+    res.once('finish', () => logger.info('http.request', {
+      method: req.method, path: url.pathname, statusCode: res.statusCode,
+    }));
 
     if (req.method === 'GET' && url.pathname === '/health') {
       send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok' }));
       return;
     }
 
-    if (url.pathname === '/health') {
+    if (req.method === 'GET' && url.pathname === '/ready') {
+      try {
+        const state = await readiness();
+        const ready = state?.ready === true;
+        send(res, ready ? 200 : 503, 'application/json; charset=utf-8', JSON.stringify({ status: ready ? 'ready' : 'not_ready' }));
+      } catch (error) {
+        logger.warn('readiness.failed', { error });
+        send(res, 503, 'application/json; charset=utf-8', JSON.stringify({ status: 'not_ready' }));
+      }
+      return;
+    }
+
+    if (url.pathname === '/health' || url.pathname === '/ready') {
       res.setHeader('allow', 'GET');
       send(res, 405, 'text/plain; charset=utf-8', 'Method Not Allowed');
       return;
@@ -70,57 +71,33 @@ export function createServer({ logger = defaultLogger } = {}) {
 
   server.on('clientError', (error, socket) => {
     logger.warn('http.client_error', { error });
-    if (socket.writable) {
-      socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
-    }
-  });
-
-  return server;
-}
-
-export function startServer({ host = config.host, port = config.port, logger = defaultLogger } = {}) {
-  const server = createServer({ logger });
-  server.listen(port, host, () => {
-    logger.info('service.started', { host, port });
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
   });
   return server;
 }
 
-export function installGracefulShutdown(server, {
-  signals = ['SIGINT', 'SIGTERM'],
-  exit = (code) => process.exit(code),
-  timeoutMs = 5000,
-  logger = defaultLogger,
-} = {}) {
+export function startServer({ host = config.host, port = config.port, logger = defaultLogger, readiness } = {}) {
+  const server = createServer({ logger, readiness });
+  server.listen(port, host, () => logger.info('service.started', { host, port }));
+  return server;
+}
+
+export function installGracefulShutdown(server, { signals = ['SIGINT', 'SIGTERM'], exit = (code) => process.exit(code), timeoutMs = 5000, logger = defaultLogger } = {}) {
   let shuttingDown = false;
-
   const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info('service.shutdown_started', { signal });
-
-    const timer = setTimeout(() => {
-      logger.error('service.shutdown_timeout');
-      exit(1);
-    }, timeoutMs);
+    const timer = setTimeout(() => { logger.error('service.shutdown_timeout'); exit(1); }, timeoutMs);
     timer.unref?.();
-
     server.close((error) => {
       clearTimeout(timer);
-      if (error) {
-        logger.error('service.shutdown_failed', { error });
-        exit(1);
-        return;
-      }
+      if (error) { logger.error('service.shutdown_failed', { error }); exit(1); return; }
       logger.info('service.shutdown_complete');
       exit(0);
     });
   };
-
-  for (const signal of signals) {
-    process.once(signal, () => shutdown(signal));
-  }
-
+  for (const signal of signals) process.once(signal, () => shutdown(signal));
   return shutdown;
 }
 
