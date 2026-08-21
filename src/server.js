@@ -43,6 +43,43 @@ export function startServer({ host = config.host, port = config.port } = {}) {
   return server;
 }
 
+export function installGracefulShutdown(server, {
+  signals = ['SIGINT', 'SIGTERM'],
+  exit = (code) => process.exit(code),
+  timeoutMs = 5000,
+} = {}) {
+  let shuttingDown = false;
+
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`received ${signal}; shutting down`);
+
+    const timer = setTimeout(() => {
+      console.error('graceful shutdown timed out');
+      exit(1);
+    }, timeoutMs);
+    timer.unref?.();
+
+    server.close((error) => {
+      clearTimeout(timer);
+      if (error) {
+        console.error('server shutdown failed', error);
+        exit(1);
+        return;
+      }
+      exit(0);
+    });
+  };
+
+  for (const signal of signals) {
+    process.once(signal, () => shutdown(signal));
+  }
+
+  return shutdown;
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  startServer();
+  const server = startServer();
+  installGracefulShutdown(server);
 }
