@@ -1,17 +1,29 @@
 import http from 'node:http';
+import { fileURLToPath } from 'node:url';
+
 import { config } from './config.js';
 
-const server = http.createServer((req, res) => {
-  if (req.method === 'GET' && req.url === '/health') {
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ status: 'ok' }));
-    return;
-  }
+export function createServer() {
+  return http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
 
-  res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify({ error: 'not_found' }));
-});
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Not Found');
+  });
+}
 
-server.listen(config.port, () => {
-  console.log(`obedience-bridge listening on port ${config.port}`);
-});
+export function startServer(port = config.port) {
+  const server = createServer();
+  server.listen(port, () => {
+    console.log(`obedience-bridge listening on port ${port}`);
+  });
+  return server;
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  startServer();
+}
