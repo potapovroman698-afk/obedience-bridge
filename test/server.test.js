@@ -12,6 +12,18 @@ async function withServer(t, options = {}) {
   return { baseUrl: `http://127.0.0.1:${address.port}`, port: address.port, server };
 }
 
+test('GET / returns a minimal service status', async (t) => {
+  const { baseUrl } = await withServer(t);
+  const response = await fetch(baseUrl);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8');
+  assert.deepEqual(await response.json(), {
+    status: 'ok',
+    service: 'obedience-bridge',
+    obedienceAuthorization: 'unavailable',
+  });
+});
+
 test('GET /health returns a minimal healthy response with defensive headers', async (t) => {
   const { baseUrl } = await withServer(t);
   const response = await fetch(`${baseUrl}/health`);
