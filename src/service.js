@@ -1,3 +1,10 @@
+export function createAdapterReadiness(adapter) {
+  return async () => {
+    const status = await adapter.getStatus();
+    return Object.freeze({ ready: status?.configured === true && status?.connected === true });
+  };
+}
+
 export function createService({ server, adapter, logger }) {
   let started = false;
 
