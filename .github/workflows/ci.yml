@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - 'feat/**'
+      - 'chore/**'
   workflow_dispatch:
 
 permissions:
@@ -18,10 +19,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@v7
         with:
-          node-version: 20
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
       - name: Run tests
         run: npm test
