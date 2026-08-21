@@ -8,6 +8,13 @@ const RESPONSE_HEADERS = Object.freeze({
   'x-content-type-options': 'nosniff',
 });
 
+const HTTP_LIMITS = Object.freeze({
+  headersTimeout: 10_000,
+  requestTimeout: 15_000,
+  keepAliveTimeout: 5_000,
+  maxHeadersCount: 50,
+});
+
 function send(res, statusCode, contentType, body) {
   res.writeHead(statusCode, {
     ...RESPONSE_HEADERS,
@@ -16,9 +23,21 @@ function send(res, statusCode, contentType, body) {
   res.end(body);
 }
 
+function parseRequestUrl(value) {
+  try {
+    return new URL(value ?? '/', 'http://localhost');
+  } catch {
+    return null;
+  }
+}
+
 export function createServer() {
-  return http.createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
+  const server = http.createServer((req, res) => {
+    const url = parseRequestUrl(req.url);
+    if (!url) {
+      send(res, 400, 'text/plain; charset=utf-8', 'Bad Request');
+      return;
+    }
 
     if (req.method === 'GET' && url.pathname === '/health') {
       send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok' }));
@@ -33,6 +52,19 @@ export function createServer() {
 
     send(res, 404, 'text/plain; charset=utf-8', 'Not Found');
   });
+
+  server.headersTimeout = HTTP_LIMITS.headersTimeout;
+  server.requestTimeout = HTTP_LIMITS.requestTimeout;
+  server.keepAliveTimeout = HTTP_LIMITS.keepAliveTimeout;
+  server.maxHeadersCount = HTTP_LIMITS.maxHeadersCount;
+
+  server.on('clientError', (_error, socket) => {
+    if (socket.writable) {
+      socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    }
+  });
+
+  return server;
 }
 
 export function startServer({ host = config.host, port = config.port } = {}) {
