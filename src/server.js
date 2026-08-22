@@ -61,12 +61,13 @@ export function createServer({ logger = defaultLogger, readiness = async () => (
       catch { send(res, 500, 'application/json; charset=utf-8', JSON.stringify({ status: 'error' })); return; }
       send(res, 202, 'application/json; charset=utf-8', JSON.stringify({ status: 'accepted' })); return;
     }
-    if (req.method === 'GET' && url.pathname === '/') { send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok', service: 'obedience-bridge', obedienceAuthorization: obedienceAuth ? 'available' : 'unavailable', mcp: mcp ? '/mcp' : null })); return; }
+    if (req.method === 'GET' && url.pathname === '/') { send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok', service: 'obedience-bridge', obedienceAuthorization: obedienceAuth ? 'available' : 'unavailable' })); return; }
     if (url.pathname === '/health') {
       if (req.method !== 'GET') { res.setHeader('allow', 'GET'); send(res, 405, 'text/plain; charset=utf-8', 'Method Not Allowed'); return; }
       send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok' })); return;
     }
-    if (req.method === 'GET' && url.pathname === '/ready') {
+    if (url.pathname === '/ready') {
+      if (req.method !== 'GET') { res.setHeader('allow', 'GET'); send(res, 405, 'text/plain; charset=utf-8', 'Method Not Allowed'); return; }
       try { const state = await readiness(); const ready = state?.ready === true; send(res, ready ? 200 : 503, 'application/json; charset=utf-8', JSON.stringify({ status: ready ? 'ready' : 'not_ready' })); }
       catch { send(res, 503, 'application/json; charset=utf-8', JSON.stringify({ status: 'not_ready' })); }
       return;
