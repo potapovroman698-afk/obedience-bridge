@@ -4,6 +4,7 @@ import { logger as defaultLogger } from './logger.js';
 import { createObedienceAuthHandler } from './obedience/auth.js';
 import { createObedienceReadClient } from './obedience/client.js';
 import { createCredentialStore } from './obedience/credentials.js';
+import { createObedienceWebhookVerifier } from './obedience/webhook.js';
 import { createMcpHandler } from './mcp.js';
 import { createServer } from './server.js';
 import { createAdapterReadiness, createService } from './service.js';
@@ -41,15 +42,21 @@ export function createObedienceRuntime(obedienceConfig) {
   });
 }
 
-export function createApplication({ logger = defaultLogger, adapter = createAdapter(config.adapter), host = config.host, port = config.port, obedience = config.obedience, bridgeAccessToken = config.bridgeAccessToken } = {}) {
+export function createObedienceWebhookRuntime(webhookConfig) {
+  if (!webhookConfig) return null;
+  return createObedienceWebhookVerifier(webhookConfig);
+}
+
+export function createApplication({ logger = defaultLogger, adapter = createAdapter(config.adapter), host = config.host, port = config.port, obedience = config.obedience, obedienceWebhook = config.obedienceWebhook, bridgeAccessToken = config.bridgeAccessToken } = {}) {
   const readiness = createAdapterReadiness(adapter);
   const obedienceRuntime = createObedienceRuntime(obedience);
+  const webhookRuntime = createObedienceWebhookRuntime(obedienceWebhook);
   const mcp = createMcpHandler({
     obedienceRead: obedienceRuntime?.read,
     authorize: obedience ? new URL('/obedience/authorize', obedience.redirectUrl).toString() : null,
   });
-  const server = createServer({ logger, readiness, obedienceAuth: obedienceRuntime?.auth, obedienceCheck: obedienceRuntime?.checkConnection, obedienceRead: obedienceRuntime?.read, bridgeAccessToken, mcp });
+  const server = createServer({ logger, readiness, obedienceAuth: obedienceRuntime?.auth, obedienceCheck: obedienceRuntime?.checkConnection, obedienceRead: obedienceRuntime?.read, obedienceWebhook: webhookRuntime, bridgeAccessToken, mcp });
   const service = createService({ server, adapter, logger });
 
-  return Object.freeze({ adapter, server, obedience: obedienceRuntime, async start() { await service.start({ host, port }); }, async stop() { await service.stop(); } });
+  return Object.freeze({ adapter, server, obedience: obedienceRuntime, obedienceWebhook: webhookRuntime, async start() { await service.start({ host, port }); }, async stop() { await service.stop(); } });
 }
