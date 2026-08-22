@@ -5,6 +5,7 @@ import { createObedienceAuthHandler } from './obedience/auth.js';
 import { createObedienceReadClient } from './obedience/client.js';
 import { createCredentialStore } from './obedience/credentials.js';
 import { createObedienceWebhookVerifier } from './obedience/webhook.js';
+import { createPostgresSyncEventStore } from './persistence/sync-events.js';
 import { createMcpHandler } from './mcp.js';
 import { createServer } from './server.js';
 import { createAdapterReadiness, createService } from './service.js';
@@ -42,15 +43,29 @@ export function createObedienceRuntime(obedienceConfig) {
   });
 }
 
-export function createObedienceWebhookRuntime(webhookConfig) {
+export function createObedienceWebhookRuntime(webhookConfig, syncEventStore = null) {
   if (!webhookConfig) return null;
-  return createObedienceWebhookVerifier(webhookConfig);
+  const verifier = createObedienceWebhookVerifier(webhookConfig);
+  if (!syncEventStore) return verifier;
+  return Object.freeze({
+    ...verifier,
+    async onEvent(event) {
+      const id = await syncEventStore.begin(event.type);
+      try {
+        await syncEventStore.finish(id, 'processed');
+      } catch (error) {
+        try { await syncEventStore.finish(id, 'failed'); } catch {}
+        throw error;
+      }
+    },
+  });
 }
 
-export function createApplication({ logger = defaultLogger, adapter = createAdapter(config.adapter), host = config.host, port = config.port, obedience = config.obedience, obedienceWebhook = config.obedienceWebhook, bridgeAccessToken = config.bridgeAccessToken } = {}) {
+export function createApplication({ logger = defaultLogger, adapter = createAdapter(config.adapter), host = config.host, port = config.port, database = config.database, obedience = config.obedience, obedienceWebhook = config.obedienceWebhook, bridgeAccessToken = config.bridgeAccessToken } = {}) {
   const readiness = createAdapterReadiness(adapter);
   const obedienceRuntime = createObedienceRuntime(obedience);
-  const webhookRuntime = createObedienceWebhookRuntime(obedienceWebhook);
+  const syncEventStore = database ? createPostgresSyncEventStore(database) : null;
+  const webhookRuntime = createObedienceWebhookRuntime(obedienceWebhook, syncEventStore);
   const mcp = createMcpHandler({
     obedienceRead: obedienceRuntime?.read,
     authorize: obedience ? new URL('/obedience/authorize', obedience.redirectUrl).toString() : null,
@@ -58,5 +73,15 @@ export function createApplication({ logger = defaultLogger, adapter = createAdap
   const server = createServer({ logger, readiness, obedienceAuth: obedienceRuntime?.auth, obedienceCheck: obedienceRuntime?.checkConnection, obedienceRead: obedienceRuntime?.read, obedienceWebhook: webhookRuntime, bridgeAccessToken, mcp });
   const service = createService({ server, adapter, logger });
 
-  return Object.freeze({ adapter, server, obedience: obedienceRuntime, obedienceWebhook: webhookRuntime, async start() { await service.start({ host, port }); }, async stop() { await service.stop(); } });
+  return Object.freeze({
+    adapter,
+    server,
+    obedience: obedienceRuntime,
+    obedienceWebhook: webhookRuntime,
+    async start() { await service.start({ host, port }); },
+    async stop() {
+      await service.stop();
+      await syncEventStore?.close?.();
+    },
+  });
 }
