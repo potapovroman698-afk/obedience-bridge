@@ -9,6 +9,8 @@ const RESPONSE_HEADERS = Object.freeze({ 'cache-control': 'no-store', 'x-content
 const HTTP_LIMITS = Object.freeze({ headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 5_000, maxHeadersCount: 50 });
 const READ_ROUTE_PREFIX = '/api/obedience/';
 const READ_RESOURCES = new Set(['habits', 'rewards', 'punishments', 'relationships']);
+const WEBHOOK_PATH = '/obedience/webhook';
+const WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
 function send(res, statusCode, contentType, body, headers = {}) { res.writeHead(statusCode, { ...RESPONSE_HEADERS, ...headers, 'content-type': contentType }); res.end(body); }
 function parseRequestUrl(value) { try { return new URL(value ?? '/', 'http://localhost'); } catch { return null; } }
@@ -19,8 +21,23 @@ function authorized(req, token) {
   const supplied = Buffer.from(value.slice(7)); const expected = Buffer.from(token);
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
+function readRawBody(req, maxBytes = WEBHOOK_MAX_BODY_BYTES) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let size = 0; let settled = false;
+    const fail = (error) => { if (settled) return; settled = true; reject(error); };
+    req.on('data', (chunk) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > maxBytes) { const error = new Error('request body too large'); error.code = 'BODY_TOO_LARGE'; fail(error); return; }
+      chunks.push(chunk);
+    });
+    req.on('end', () => { if (settled) return; settled = true; resolve(Buffer.concat(chunks)); });
+    req.on('error', fail);
+    req.on('aborted', () => fail(new Error('request aborted')));
+  });
+}
 
-export function createServer({ logger = defaultLogger, readiness = async () => ({ ready: true }), obedienceAuth, obedienceCheck, obedienceRead, bridgeAccessToken, mcp } = {}) {
+export function createServer({ logger = defaultLogger, readiness = async () => ({ ready: true }), obedienceAuth, obedienceCheck, obedienceRead, obedienceWebhook, bridgeAccessToken, mcp } = {}) {
   const server = http.createServer(async (req, res) => {
     const url = parseRequestUrl(req.url);
     if (!url) { send(res, 400, 'text/plain; charset=utf-8', 'Bad Request'); return; }
@@ -29,6 +46,20 @@ export function createServer({ logger = defaultLogger, readiness = async () => (
     if (url.pathname === '/mcp') {
       if (!mcp) { send(res, 503, 'application/json; charset=utf-8', JSON.stringify({ status: 'unavailable' })); return; }
       await mcp(req, res); return;
+    }
+    if (url.pathname === WEBHOOK_PATH) {
+      if (req.method !== 'POST') { res.setHeader('allow', 'POST'); send(res, 405, 'text/plain; charset=utf-8', 'Method Not Allowed'); return; }
+      if (!obedienceWebhook) { send(res, 503, 'application/json; charset=utf-8', JSON.stringify({ status: 'unavailable' })); return; }
+      let rawBody;
+      try { rawBody = await readRawBody(req); }
+      catch (error) { send(res, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, 'application/json; charset=utf-8', JSON.stringify({ status: 'rejected' })); return; }
+      let result;
+      try { result = obedienceWebhook.verify({ rawBody, signature: req.headers['x-signature'] }); }
+      catch { send(res, 400, 'application/json; charset=utf-8', JSON.stringify({ status: 'rejected' })); return; }
+      if (!result?.accepted) { send(res, 401, 'application/json; charset=utf-8', JSON.stringify({ status: 'rejected' })); return; }
+      try { await obedienceWebhook.onEvent?.(result.event); }
+      catch { send(res, 500, 'application/json; charset=utf-8', JSON.stringify({ status: 'error' })); return; }
+      send(res, 202, 'application/json; charset=utf-8', JSON.stringify({ status: 'accepted' })); return;
     }
     if (req.method === 'GET' && url.pathname === '/') { send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok', service: 'obedience-bridge', obedienceAuthorization: obedienceAuth ? 'available' : 'unavailable', mcp: mcp ? '/mcp' : null })); return; }
     if (req.method === 'GET' && url.pathname === '/health') { send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok' })); return; }
@@ -73,6 +104,6 @@ export function createServer({ logger = defaultLogger, readiness = async () => (
   return server;
 }
 
-export function startServer({ host = config.host, port = config.port, logger = defaultLogger, readiness, obedienceAuth, obedienceCheck, obedienceRead, bridgeAccessToken = config.bridgeAccessToken, mcp } = {}) { const server = createServer({ logger, readiness, obedienceAuth, obedienceCheck, obedienceRead, bridgeAccessToken, mcp }); server.listen(port, host, () => logger.info('service.started', { host, port })); return server; }
+export function startServer({ host = config.host, port = config.port, logger = defaultLogger, readiness, obedienceAuth, obedienceCheck, obedienceRead, obedienceWebhook, bridgeAccessToken = config.bridgeAccessToken, mcp } = {}) { const server = createServer({ logger, readiness, obedienceAuth, obedienceCheck, obedienceRead, obedienceWebhook, bridgeAccessToken, mcp }); server.listen(port, host, () => logger.info('service.started', { host, port })); return server; }
 export function installGracefulShutdown(server, { signals = ['SIGINT', 'SIGTERM'], exit = (code) => process.exit(code), timeoutMs = 5000, logger = defaultLogger } = {}) { let shuttingDown = false; const shutdown = (signal) => { if (shuttingDown) return; shuttingDown = true; const timer = setTimeout(() => exit(1), timeoutMs); timer.unref?.(); server.close((error) => { clearTimeout(timer); exit(error ? 1 : 0); }); }; for (const signal of signals) process.once(signal, () => shutdown(signal)); return shutdown; }
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) { const server = startServer(); installGracefulShutdown(server); }
