@@ -1,5 +1,5 @@
 const DEFAULT_PORT = 3000;
-const DEFAULT_HOST = '127.0.0.1';
+const DEFAULT_HOST = '0.0.0.0';
 const DEFAULT_ADAPTER = 'fake';
 const SUPPORTED_ADAPTERS = new Set(['fake']);
 
