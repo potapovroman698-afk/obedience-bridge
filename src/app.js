@@ -11,16 +11,28 @@ export function createObedienceRuntime(obedienceConfig) {
   if (!obedienceConfig) return null;
   const credentialStore = createCredentialStore({ path: obedienceConfig.credentialPath });
 
-  async function checkConnection() {
+  async function withClient(action) {
     const credentials = await credentialStore.load();
-    if (!credentials) return Object.freeze({ connected: false });
-
+    if (!credentials) return null;
     const client = createObedienceReadClient({
       extensionId: credentials.id,
       secret: credentials.secret,
     });
-    await client.getHabits();
-    return Object.freeze({ connected: true, uid: credentials.uid });
+    return action(client, credentials);
+  }
+
+  async function checkConnection() {
+    const result = await withClient(async (client, credentials) => {
+      await client.getHabits();
+      return Object.freeze({ connected: true, uid: credentials.uid });
+    });
+    return result ?? Object.freeze({ connected: false });
+  }
+
+  async function read(resource) {
+    const result = await withClient((client) => client.get(resource));
+    if (result === null) return Object.freeze({ authorized: false });
+    return Object.freeze({ authorized: true, data: result });
   }
 
   return Object.freeze({
@@ -32,6 +44,7 @@ export function createObedienceRuntime(obedienceConfig) {
       credentialStore,
     }),
     checkConnection,
+    read,
   });
 }
 
@@ -41,6 +54,7 @@ export function createApplication({
   host = config.host,
   port = config.port,
   obedience = config.obedience,
+  bridgeAccessToken = config.bridgeAccessToken,
 } = {}) {
   const readiness = createAdapterReadiness(adapter);
   const obedienceRuntime = createObedienceRuntime(obedience);
@@ -49,6 +63,8 @@ export function createApplication({
     readiness,
     obedienceAuth: obedienceRuntime?.auth,
     obedienceCheck: obedienceRuntime?.checkConnection,
+    obedienceRead: obedienceRuntime?.read,
+    bridgeAccessToken,
   });
   const service = createService({ server, adapter, logger });
 

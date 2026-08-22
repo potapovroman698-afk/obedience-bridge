@@ -56,6 +56,7 @@ export function loadConfig(env = process.env) {
     port: parsePort(env.PORT),
     adapter: parseAdapter(env.ADAPTER),
     obedience: parseObedienceConfig(env),
+    bridgeAccessToken: optionalString(env.BRIDGE_ACCESS_TOKEN, 'BRIDGE_ACCESS_TOKEN'),
   });
 }
 

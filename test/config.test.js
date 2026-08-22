@@ -4,7 +4,7 @@ import test from 'node:test';
 import { loadConfig, parseAdapter, parseHost, parsePort } from '../src/config.js';
 
 test('loadConfig uses safe defaults', () => {
-  assert.deepEqual(loadConfig({}), { host: '127.0.0.1', port: 3000, adapter: 'fake', obedience: null });
+  assert.deepEqual(loadConfig({}), { host: '127.0.0.1', port: 3000, adapter: 'fake', obedience: null, bridgeAccessToken: null });
 });
 
 test('parsePort accepts only complete decimal integers in range', () => {
@@ -26,6 +26,11 @@ test('parseAdapter accepts only implemented adapters', () => {
 
 test('loadConfig returns a frozen validated object', () => {
   const value = loadConfig({ HOST: 'localhost', PORT: '8080', ADAPTER: 'fake' });
-  assert.deepEqual(value, { host: 'localhost', port: 8080, adapter: 'fake', obedience: null });
+  assert.deepEqual(value, { host: 'localhost', port: 8080, adapter: 'fake', obedience: null, bridgeAccessToken: null });
   assert.equal(Object.isFrozen(value), true);
+});
+
+test('bridge access token is optional but rejects surrounding whitespace', () => {
+  assert.equal(loadConfig({ BRIDGE_ACCESS_TOKEN: 'secret-value' }).bridgeAccessToken, 'secret-value');
+  assert.throws(() => loadConfig({ BRIDGE_ACCESS_TOKEN: ' secret-value' }), /BRIDGE_ACCESS_TOKEN/);
 });
