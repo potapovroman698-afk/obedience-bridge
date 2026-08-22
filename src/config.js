@@ -50,12 +50,23 @@ export function parseObedienceConfig(env) {
   return Object.freeze({ extensionId, redirectUrl, credentialPath, name });
 }
 
+export function parseObedienceWebhookConfig(env) {
+  const publicKeyPem = optionalString(env.OBEDIENCE_WEBHOOK_PUBLIC_KEY, 'OBEDIENCE_WEBHOOK_PUBLIC_KEY');
+  const extensionId = optionalString(env.OBEDIENCE_WEBHOOK_EXTENSION_ID, 'OBEDIENCE_WEBHOOK_EXTENSION_ID');
+  const secret = optionalString(env.OBEDIENCE_WEBHOOK_SECRET, 'OBEDIENCE_WEBHOOK_SECRET');
+  const supplied = [publicKeyPem, extensionId, secret].filter(Boolean).length;
+  if (supplied === 0) return null;
+  if (supplied !== 3) throw new Error('Obedience webhook requires OBEDIENCE_WEBHOOK_PUBLIC_KEY, OBEDIENCE_WEBHOOK_EXTENSION_ID, and OBEDIENCE_WEBHOOK_SECRET together');
+  return Object.freeze({ publicKeyPem, extensionId, secret });
+}
+
 export function loadConfig(env = process.env) {
   return Object.freeze({
     host: parseHost(env.HOST),
     port: parsePort(env.PORT),
     adapter: parseAdapter(env.ADAPTER),
     obedience: parseObedienceConfig(env),
+    obedienceWebhook: parseObedienceWebhookConfig(env),
     bridgeAccessToken: optionalString(env.BRIDGE_ACCESS_TOKEN, 'BRIDGE_ACCESS_TOKEN'),
   });
 }
