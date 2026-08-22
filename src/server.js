@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { config } from './config.js';
@@ -17,6 +18,9 @@ const HTTP_LIMITS = Object.freeze({
   maxHeadersCount: 50,
 });
 
+const READ_ROUTE_PREFIX = '/api/obedience/';
+const READ_RESOURCES = new Set(['habits', 'rewards', 'punishments', 'relationships']);
+
 function send(res, statusCode, contentType, body, headers = {}) {
   res.writeHead(statusCode, { ...RESPONSE_HEADERS, ...headers, 'content-type': contentType });
   res.end(body);
@@ -26,11 +30,22 @@ function parseRequestUrl(value) {
   try { return new URL(value ?? '/', 'http://localhost'); } catch { return null; }
 }
 
+function authorized(req, token) {
+  if (!token) return false;
+  const value = req.headers.authorization;
+  if (typeof value !== 'string' || !value.startsWith('Bearer ')) return false;
+  const supplied = Buffer.from(value.slice(7));
+  const expected = Buffer.from(token);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
+
 export function createServer({
   logger = defaultLogger,
   readiness = async () => ({ ready: true }),
   obedienceAuth,
   obedienceCheck,
+  obedienceRead,
+  bridgeAccessToken,
 } = {}) {
   const server = http.createServer(async (req, res) => {
     const url = parseRequestUrl(req.url);
@@ -40,7 +55,6 @@ export function createServer({
       return;
     }
 
-    // Log pathname only. Authorization callbacks contain secret material in the query string.
     res.once('finish', () => logger.info('http.request', {
       method: req.method, path: url.pathname, statusCode: res.statusCode,
     }));
@@ -89,7 +103,6 @@ export function createServer({
         const result = await obedienceAuth.callback(url.toString());
         send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'authorized', uid: result.uid }));
       } catch (error) {
-        // Never log the request URL or callback parameters: the query includes the extension secret.
         logger.warn('obedience.authorization_callback_failed', { error: new Error('authorization callback rejected') });
         send(res, 400, 'text/plain; charset=utf-8', 'Authorization callback rejected');
       }
@@ -107,10 +120,47 @@ export function createServer({
           send(res, 401, 'application/json; charset=utf-8', JSON.stringify({ status: 'authorization_required' }));
           return;
         }
-        // Deliberately do not expose habits, rewards, relationship data, uid, or credentials here.
         send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'connected' }));
       } catch (error) {
         logger.warn('obedience.connection_check_failed', { error: new Error('Obedience API connection check failed') });
+        send(res, 502, 'application/json; charset=utf-8', JSON.stringify({ status: 'upstream_error' }));
+      }
+      return;
+    }
+
+    if (url.pathname.startsWith(READ_ROUTE_PREFIX)) {
+      if (req.method !== 'GET') {
+        res.setHeader('allow', 'GET');
+        send(res, 405, 'text/plain; charset=utf-8', 'Method Not Allowed');
+        return;
+      }
+      const resource = url.pathname.slice(READ_ROUTE_PREFIX.length);
+      if (!READ_RESOURCES.has(resource)) {
+        send(res, 404, 'text/plain; charset=utf-8', 'Not Found');
+        return;
+      }
+      if (!bridgeAccessToken) {
+        send(res, 503, 'application/json; charset=utf-8', JSON.stringify({ status: 'access_not_configured' }));
+        return;
+      }
+      if (!authorized(req, bridgeAccessToken)) {
+        res.setHeader('www-authenticate', 'Bearer');
+        send(res, 401, 'application/json; charset=utf-8', JSON.stringify({ status: 'unauthorized' }));
+        return;
+      }
+      if (!obedienceRead) {
+        send(res, 503, 'application/json; charset=utf-8', JSON.stringify({ status: 'unavailable' }));
+        return;
+      }
+      try {
+        const result = await obedienceRead(resource);
+        if (!result?.authorized) {
+          send(res, 401, 'application/json; charset=utf-8', JSON.stringify({ status: 'authorization_required' }));
+          return;
+        }
+        send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'ok', data: result.data }));
+      } catch (error) {
+        logger.warn('obedience.read_failed', { resource, error: new Error('Obedience API read failed') });
         send(res, 502, 'application/json; charset=utf-8', JSON.stringify({ status: 'upstream_error' }));
       }
       return;
@@ -137,8 +187,8 @@ export function createServer({
   return server;
 }
 
-export function startServer({ host = config.host, port = config.port, logger = defaultLogger, readiness, obedienceAuth, obedienceCheck } = {}) {
-  const server = createServer({ logger, readiness, obedienceAuth, obedienceCheck });
+export function startServer({ host = config.host, port = config.port, logger = defaultLogger, readiness, obedienceAuth, obedienceCheck, obedienceRead, bridgeAccessToken = config.bridgeAccessToken } = {}) {
+  const server = createServer({ logger, readiness, obedienceAuth, obedienceCheck, obedienceRead, bridgeAccessToken });
   server.listen(port, host, () => logger.info('service.started', { host, port }));
   return server;
 }
