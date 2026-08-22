@@ -90,6 +90,33 @@ test('rejected Obedience callback does not leak callback parameters into logs or
   assert.equal(JSON.stringify(records).includes('DO_NOT_LOG'), false);
 });
 
+test('Obedience connection check confirms access without exposing account data', async (t) => {
+  const { baseUrl } = await withServer(t, { obedienceCheck: async () => ({ connected: true, uid: 'private-user-id' }) });
+  const response = await fetch(`${baseUrl}/obedience/check`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: 'connected' });
+});
+
+test('Obedience connection check reports when authorization is required', async (t) => {
+  const { baseUrl } = await withServer(t, { obedienceCheck: async () => ({ connected: false }) });
+  const response = await fetch(`${baseUrl}/obedience/check`);
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { status: 'authorization_required' });
+});
+
+test('Obedience connection check sanitizes upstream failures', async (t) => {
+  const records = [];
+  const logger = { info: () => {}, warn: (event, data) => records.push([event, data]), error() {} };
+  const { baseUrl } = await withServer(t, {
+    logger,
+    obedienceCheck: async () => { throw new Error('secret=DO_NOT_LOG'); },
+  });
+  const response = await fetch(`${baseUrl}/obedience/check`);
+  assert.equal(response.status, 502);
+  assert.deepEqual(await response.json(), { status: 'upstream_error' });
+  assert.equal(JSON.stringify(records).includes('DO_NOT_LOG'), false);
+});
+
 test('unknown routes return 404 without leaking details', async (t) => {
   const { baseUrl } = await withServer(t);
   const response = await fetch(`${baseUrl}/missing`);

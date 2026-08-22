@@ -26,7 +26,12 @@ function parseRequestUrl(value) {
   try { return new URL(value ?? '/', 'http://localhost'); } catch { return null; }
 }
 
-export function createServer({ logger = defaultLogger, readiness = async () => ({ ready: true }), obedienceAuth } = {}) {
+export function createServer({
+  logger = defaultLogger,
+  readiness = async () => ({ ready: true }),
+  obedienceAuth,
+  obedienceCheck,
+} = {}) {
   const server = http.createServer(async (req, res) => {
     const url = parseRequestUrl(req.url);
     if (!url) {
@@ -91,7 +96,27 @@ export function createServer({ logger = defaultLogger, readiness = async () => (
       return;
     }
 
-    if (['/', '/health', '/ready', '/obedience/authorize', '/obedience/callback'].includes(url.pathname)) {
+    if (req.method === 'GET' && url.pathname === '/obedience/check') {
+      if (!obedienceCheck) {
+        send(res, 503, 'application/json; charset=utf-8', JSON.stringify({ status: 'unavailable' }));
+        return;
+      }
+      try {
+        const state = await obedienceCheck();
+        if (!state?.connected) {
+          send(res, 401, 'application/json; charset=utf-8', JSON.stringify({ status: 'authorization_required' }));
+          return;
+        }
+        // Deliberately do not expose habits, rewards, relationship data, uid, or credentials here.
+        send(res, 200, 'application/json; charset=utf-8', JSON.stringify({ status: 'connected' }));
+      } catch (error) {
+        logger.warn('obedience.connection_check_failed', { error: new Error('Obedience API connection check failed') });
+        send(res, 502, 'application/json; charset=utf-8', JSON.stringify({ status: 'upstream_error' }));
+      }
+      return;
+    }
+
+    if (['/', '/health', '/ready', '/obedience/authorize', '/obedience/callback', '/obedience/check'].includes(url.pathname)) {
       res.setHeader('allow', 'GET');
       send(res, 405, 'text/plain; charset=utf-8', 'Method Not Allowed');
       return;
@@ -112,8 +137,8 @@ export function createServer({ logger = defaultLogger, readiness = async () => (
   return server;
 }
 
-export function startServer({ host = config.host, port = config.port, logger = defaultLogger, readiness, obedienceAuth } = {}) {
-  const server = createServer({ logger, readiness, obedienceAuth });
+export function startServer({ host = config.host, port = config.port, logger = defaultLogger, readiness, obedienceAuth, obedienceCheck } = {}) {
+  const server = createServer({ logger, readiness, obedienceAuth, obedienceCheck });
   server.listen(port, host, () => logger.info('service.started', { host, port }));
   return server;
 }
