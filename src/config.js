@@ -30,23 +30,27 @@ function optionalString(value, name) {
   return value;
 }
 
+export function parseDatabaseConfig(env) {
+  const databaseUrl = optionalString(env.DATABASE_URL, 'DATABASE_URL');
+  if (!databaseUrl) return null;
+  let parsed;
+  try { parsed = new URL(databaseUrl); } catch { throw new Error('DATABASE_URL must be a valid PostgreSQL URL'); }
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) throw new Error('DATABASE_URL must use postgres:// or postgresql://');
+  return Object.freeze({ databaseUrl });
+}
+
 export function parseObedienceConfig(env) {
   const extensionId = optionalString(env.OBEDIENCE_EXTENSION_ID, 'OBEDIENCE_EXTENSION_ID');
   const redirectUrl = optionalString(env.OBEDIENCE_REDIRECT_URL, 'OBEDIENCE_REDIRECT_URL');
   const credentialPath = optionalString(env.OBEDIENCE_CREDENTIAL_PATH, 'OBEDIENCE_CREDENTIAL_PATH');
   const name = optionalString(env.OBEDIENCE_EXTENSION_NAME, 'OBEDIENCE_EXTENSION_NAME') ?? 'Obedience Bridge';
-
   const supplied = [extensionId, redirectUrl, credentialPath].filter(Boolean).length;
   if (supplied === 0) return null;
   if (supplied !== 3) throw new Error('Obedience auth requires OBEDIENCE_EXTENSION_ID, OBEDIENCE_REDIRECT_URL, and OBEDIENCE_CREDENTIAL_PATH together');
-
   let parsedRedirect;
   try { parsedRedirect = new URL(redirectUrl); } catch { throw new Error('OBEDIENCE_REDIRECT_URL must be a valid HTTPS URL'); }
-  if (parsedRedirect.protocol !== 'https:' || parsedRedirect.username || parsedRedirect.password || parsedRedirect.hash) {
-    throw new Error('OBEDIENCE_REDIRECT_URL must be an HTTPS URL without credentials or fragment');
-  }
+  if (parsedRedirect.protocol !== 'https:' || parsedRedirect.username || parsedRedirect.password || parsedRedirect.hash) throw new Error('OBEDIENCE_REDIRECT_URL must be an HTTPS URL without credentials or fragment');
   if (parsedRedirect.pathname !== '/obedience/callback') throw new Error('OBEDIENCE_REDIRECT_URL pathname must be /obedience/callback');
-
   return Object.freeze({ extensionId, redirectUrl, credentialPath, name });
 }
 
@@ -65,6 +69,7 @@ export function loadConfig(env = process.env) {
     host: parseHost(env.HOST),
     port: parsePort(env.PORT),
     adapter: parseAdapter(env.ADAPTER),
+    database: parseDatabaseConfig(env),
     obedience: parseObedienceConfig(env),
     obedienceWebhook: parseObedienceWebhookConfig(env),
     bridgeAccessToken: optionalString(env.BRIDGE_ACCESS_TOKEN, 'BRIDGE_ACCESS_TOKEN'),
