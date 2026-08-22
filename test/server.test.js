@@ -95,7 +95,6 @@ test('Obedience connection check confirms access without exposing account data',
   const response = await fetch(`${baseUrl}/obedience/check`);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: 'connected' });
-  assert.equal((await response.text?.()) ?? '', '');
 });
 
 test('Obedience connection check reports when authorization is required', async (t) => {
